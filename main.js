@@ -10,6 +10,8 @@ phina.globalize();
       santab:'santa_b',
       santaf:'santa_f',
       attackeffect: 'attackeffect',
+      treeD: 'tree_d',
+      treeN: 'tree_n',
     }
   };
   
@@ -35,6 +37,8 @@ phina.globalize();
   var CY = cy();
   var UY = sy(15);
   var DY = sy(85);
+  
+  var score = 0;
   
   
   var app;
@@ -85,6 +89,7 @@ phina.globalize();
       
       this.textLayer = DisplayElement().addChildTo(this);
       this.targetLayer = DisplayElement().addChildTo(this);
+      this.destroyLayer = DisplayElement().addChildTo(this);
       this.enemyLayer = DisplayElement().addChildTo(this);
       this.playerLayer = DisplayElement().addChildTo(this);
       this.weaponLayer = DisplayElement().addChildTo(this);
@@ -95,8 +100,31 @@ phina.globalize();
         x: CX,
         y: sy(80),
         weapon: ChainSaw().addChildTo(this.weaponLayer),
+        targets: this.targetLayer.children,
+        destroyLayer: this.destroyLayer,
       }).addChildTo(this.playerLayer);
       
+      TreeN({
+        x: 300,
+        y: 200,
+      }).addChildTo(this.targetLayer)
+      .on('destroy', function(e){
+        console.log(this.score);
+      })
+      .on('destroy', this.__addScore);
+      
+      TreeD({
+        x: 400,
+        y: 600,
+      }).addChildTo(this.targetLayer)
+      .on('destroy', function(e){
+        console.log(this.score);
+      })
+      .on('destroy', this.__addScore);
+      
+    },
+    __addScore: function(e){
+      score += this.score;
     },
     
     update: function(app){
@@ -120,6 +148,8 @@ phina.globalize();
       
       this.isMobile = phina.isMobile();
       this.weapon = opts.weapon.setTarget(this);
+      this.destroyLayer = opts.destroyLayer;
+      this.tester = HitTester(opts.targets);
     },
     
     update: function(app){
@@ -189,8 +219,8 @@ phina.globalize();
     // 装備してるオブジェクト
     target: null,
     // target からの相対位置
-    nx:0,
-    ny:0,
+    ox:0,
+    oy:0,
     state: 0,
     NEUTRAL: 0,
     ATTACK: 1,
@@ -234,8 +264,9 @@ phina.globalize();
       this.state = this.ATTACK;
       var s = this;
       var attackeffect = AttackEffect(this.target)
-        .addChildTo(app.currentScene.weaponLayer)
-        .setRange(this.range);
+        .addChildTo(this.parent)
+        .setRange(this.range)
+        .setPower(this.power);
       this.tweener.clear().to({
         rotation: - 180
       }, 10 * this.speed, 'swing').call(function(){
@@ -274,51 +305,174 @@ phina.globalize();
   
   def('AttackEffect', {
     superClass: DisplayElement,
-    
+    range:1,
+    power:1,
     init: function(opts){
       this.superInit();
-      this.effect = Sprite('attackeffect').addChildTo(this);
+      var e = this.effect = Sprite('attackeffect').addChildTo(this);
       this.x = opts.x;
       this.bottom = opts.top;
+      this.tester = opts.tester;
+      this.setSize(e.width, e.height);
+      this.hits = [];
+    },
+    
+    update: function(){
+      var power = this.power;
+      var hits = this.hits;
+      this.tester.test({
+        left: this.left,
+        top: this.top,
+        bottom: this.bottom,
+        right: this.right,
+        isHited: function(elm){
+          return hits.indexOf(elm) !== -1;
+        },
+      }, function(o){
+        hits.push(o);
+        o.damage(power);
+      });
+    },
+    
+    isHited: function(elm) {
+      return this.hits.indexOf(elm) !== -1;
     },
     
     setRange: function(range){
       this.width = this.height = range;
       this.setScale(range / 100);
       return this;
-    }
+    },
+    setPower: function(p){
+      this.power = p;
+      return this;
+    },
     
+  });
+  
+  def('TargetElement', {
+    superClass: DisplayElement,
+    hp: 100,
+    score: 1,
+    init: function(opts){
+      this.superInit(opts);
+      this.hp = opts.hp || 100;
+      this.score = opts.score || 1;
+    },
+    
+    damage: function(d){
+      if(this.isDestroyed()) return this;
+      this.hp -= d;
+      this.flare('damage', {damage: d});
+      if(this.hp <= 0){
+        this.flare('destroy', {damage: d});
+      }
+      return this;
+    },
+    
+    isDestroyed: function(){
+      return this.hp <= 0;
+    }
+  });
+  
+  def('TargetSprite', {
+    superClass: TargetElement,
+    
+    init: function(opts){
+      this.superInit(opts);
+      this.sprite = Sprite(opts.image).addChildTo(this);
+      if(opts.size){
+        this.sprite.setSize(opts.size.width, opts.size.height);
+        this.setSize(opts.size.width, opts.size.height);
+      }
+    },
+    
+    gatagata: function(n){
+      n = n || 1;
+      var c = 3;
+      this.sprite.setPosition(0, 0).tweener.setUpdateType('fps').clear().to({
+        x: 2 * n,
+        y: 0.2 * n,
+      }, 2).to({
+        x: -2 * n,
+        y: -0.2 * n,
+      }, 2)
+      .call(function(){
+        if(--c < 0) {
+          this.setLoop(false);
+          this.target.setPosition(0, 0);
+        }
+      }).setLoop(true);
+    },
+  });
+  
+  def('StaticTarget', {
+    superClass: TargetSprite,
+    
+    init: function(opts){
+      this.superInit(opts);
+      this.on('damage', function(e){
+        this.gatagata(this.width * 0.01);
+      });
+    }
+  });
+  
+  def('TreeN', {
+    superClass: 'StaticTarget',
+    
+    init: function(opts){
+      opts.image = 'treeN';
+      opts.hp = 10;
+      opts.score = 1;
+      opts.size = opts.size || {
+        width: 80,
+        height: 170,
+      };
+      this.superInit(opts);
+    }
+  });
+  
+  def('TreeD', {
+    superClass: 'StaticTarget',
+    
+    init: function(opts){
+      opts.image = 'treeD';
+      opts.hp = 15;
+      opts.score = 3;
+      opts.size = opts.size || {
+        width: 80,
+        height: 170,
+      };
+      this.superInit(opts);
+    }
   });
   
   //#utils
   def('HitTester', {
     superClass: phina.util.EventDispatcher,
     
-    init: function(target){
-      this.testers = [];
-      this.target = target;
+    init: function(targets){
+      this.targets = targets;
     },
     
     add: function(tester){
-      this.testers.push(tester);
+      this.targets.push(tester);
       return this;
     },
     
-    // 一度でもヒットするとヒットしたオブジェクトを返し終了する
-    test: function(){
-      var target = this.target;
-      var testers = this.testers.slice();
-      for(var i = 0, len = testers.length; i < len; ++i){
-        var t = testers[i];
-        if(target.hitTestElement(t)){
-          return t;
+    test: function(target, fn){
+      var targets = this.targets.slice();
+      for(var i = 0, len = targets.length; i < len; ++i){
+        var t = targets[i];
+        if(!target.isHited(t) && t.hitTestElement(target)){
+          fn(t);
         }
       }
-      return false;
+      return this;
     },
     
     erase: function(tester){
-      this.testers.erase(tester);
+      this.targets.erase(tester);
       return this;
     }
     
